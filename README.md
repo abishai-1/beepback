@@ -66,7 +66,7 @@ and it runs like a little **widget app**.
  💀 held ◀──────────────── pending = {from Arjun, 💀}, streak 🔥+1 ──────────▶ "waiting…"
 ```
 
-- **Server state** lives in memory and is written to `data/state.json` (debounced, atomic rename):
+- **Server state** lives in memory and is saved (batched) to `data/state.json`, or to Upstash Redis when configured:
   - `rooms`: `code → { clients, pending, streak, lastActive }`
   - `profiles`: `clientId → { name, color, sub (push subscription), lastSeen }`
 - `pending` is the last **unanswered emoji**. A reply from the other person replaces it and bumps the streak.
@@ -87,8 +87,8 @@ and it runs like a little **widget app**.
 smtgU/   (project folder; the app is called BeepBack)
 ├─ server.js               # rooms, pairing, held emoji, seen, streaks, push, persistence, limits
 ├─ package.json
-├─ render.yaml             # one-click Render deploy (with a disk for data/)
-├─ data/                   # created at runtime: state.json + vapid.json (git-ignored, keep private)
+├─ render.yaml             # one-click free Render deploy (data kept in Upstash Redis)
+├─ data/                   # local runtime data: state.json + vapid.json (git-ignored, keep private)
 ├─ public/
 │  ├─ index.html           # face, bubble, hug heart, bars, pairing + settings sheets
 │  ├─ style.css            # face + every expression, bubble, animations, layout
@@ -139,7 +139,9 @@ npm start            # → http://localhost:3000
 | Variable | Default | What for |
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
-| `DATA_DIR` | `./data` | where pairs + push keys are saved (point it at a persistent disk in production) |
+| `DATA_DIR` | `./data` | where pairs + push keys are saved when Upstash isn't used |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | not set | store everything in Upstash Redis instead of files (for free hosts) |
+| `STORE_PREFIX` | `beepback` | key prefix in Redis (lets several copies share one database) |
 | `STREAK_TZ` | server's zone | time zone for streak days, e.g. `Asia/Kolkata` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | auto-generated | fixed push keys (otherwise generated once into `DATA_DIR/vapid.json`) |
 | `VAPID_SUBJECT` | `mailto:beepback@example.com` | contact for push services. **Set this to your own email or site** |
@@ -159,17 +161,26 @@ PWA install needs **HTTPS** (or `localhost`):
 - **iPhone (Safari):** Share → *Add to Home Screen*
 - **Windows / Mac (Chrome or Edge):** the install icon in the address bar, or ⚙ → *Install as widget*. Resize the window small and it stays a little robot.
 
-## 🌍 Put it online
+## 🌍 Put it online (free)
 
-Your friend on another network needs the app hosted with HTTPS. You need a Node host with a **persistent disk** so pairs and push keys survive restarts:
+Free hosts wipe their disk on every restart, so BeepBack keeps its data (pairs, held emojis, streaks, push keys) in **Upstash Redis**, which is also free. The server switches to it automatically when the two `UPSTASH_*` variables are set; otherwise it uses `data/` files.
 
-| Host | How |
-|---|---|
-| **Render** | Push this folder to GitHub → Render → **New → Blueprint** → pick the repo. `render.yaml` sets up the service plus a 1 GB disk at `/var/data` (disks need the paid *Starter* plan). Set `VAPID_SUBJECT` to your email. |
-| **Railway** | Deploy from GitHub, add a **Volume** mounted at `/data`, and set `DATA_DIR=/data`. |
-| **Fly.io** | `fly launch`, `fly volumes create bb_data`, mount it at `/data` in `fly.toml`, set `DATA_DIR=/data`, then `fly deploy`. |
+**1. Upstash (database, free):** sign up at upstash.com → *Create Database* (Redis, region near you) → open it → **REST API** section → copy `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
-> On free plans without a disk, the app still works, but pairs and push keys reset whenever the server restarts or sleeps.
+**2. GitHub:** push this folder to a GitHub repo (`data/` and `node_modules/` are git-ignored).
+
+**3. Render (server, free):** render.com → **New → Blueprint** → pick the repo. `render.yaml` creates a free web service and asks for:
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`: paste from step 1
+- `VAPID_SUBJECT`: `mailto:` + your email (push services require a contact)
+
+You get an `https://beepback-xxxx.onrender.com` link. Open it on both phones, install it, pair, and turn on notifications.
+
+**4. Keep it awake (optional, free):** Render's free plan sleeps after ~15 minutes without traffic, and the first open after that takes ~30–60 s. To avoid it, create a free monitor at cron-job.org or UptimeRobot that opens `https://<your-app>.onrender.com/health` every 10 minutes. One always-on service fits in Render's free monthly hours.
+
+> Nothing is lost when it sleeps or restarts: everything is in Upstash. While asleep the server can't send notifications, but anything already sent is still waiting when your friend opens the app.
+> If Upstash can't be reached at startup, the server refuses to start (instead of starting empty and overwriting your data). Render then retries.
+
+**Paid alternatives with a real disk** (no sleeping): Render Starter with a disk (set `DATA_DIR`), Railway with a volume, or Fly.io with a volume. Leave the `UPSTASH_*` variables unset and point `DATA_DIR` at the mounted disk.
 
 ---
 
@@ -203,4 +214,5 @@ Your friend on another network needs the app hosted with HTTPS. You need a Node 
 | Install button never shows | You need HTTPS or `localhost`. Check DevTools → Application → Manifest. |
 | No sound | Browsers block audio until you tap the page once. Also check ⚙ → Sounds. |
 | Old version keeps showing | Bump `CACHE` in `sw.js`, or DevTools → Application → Service Workers → *Update*. |
+| First open is slow on the free host | Render's free plan was asleep. Add the free keep‑alive monitor (see *Put it online*). |
 | "No robot with that code" | Typo, or the pair was unused for 30 days. Create a new one. |

@@ -1,6 +1,6 @@
 // BeepBack (BB): tiny realtime server
 // Serves the PWA from /public, pairs two people per room over Socket.IO,
-// remembers pairs on disk, and sends Web Push notifications when a friend is away.
+// remembers pairs (file or Upstash Redis), and sends Web Push notifications when a friend is away.
 
 const fs = require("fs");
 const path = require("path");
@@ -11,8 +11,6 @@ const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
-const STATE_FILE = path.join(DATA_DIR, "state.json");
-const VAPID_FILE = path.join(DATA_DIR, "vapid.json");
 const PAIR_TTL_MS = 30 * 24 * 60 * 60 * 1000; // a pair is forgotten after 30 days with no activity
 const MAX_ROOMS = Number(process.env.MAX_ROOMS) || 10000;
 const MAX_PER_ROOM = 2;
@@ -38,24 +36,58 @@ const ALLOWED_STATES = new Set(["awake", "asleep"]);
 const rooms = new Map();
 const profiles = new Map();
 
-function loadState() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
-    for (const [code, r] of Object.entries(raw.rooms || {})) {
-      const clients = new Map((r.clients || []).map((id) => [id, { socketId: null, state: "awake", visible: false }]));
-      rooms.set(code, { clients, pending: r.pending || null, streak: r.streak || { count: 0, day: null }, lastActive: r.lastActive || Date.now() });
-    }
-    for (const [id, p] of Object.entries(raw.profiles || {})) profiles.set(id, p);
-    console.log(`💾 loaded ${rooms.size} pair(s) from ${STATE_FILE}`);
-  } catch (err) {
-    if (err.code !== "ENOENT") console.warn("could not read saved state:", err.message);
+// ---------------------------------------------------------------------------
+// Storage: JSON files in DATA_DIR, or Upstash Redis (free tier) when its env vars are set.
+// Free hosts wipe their disk on every restart, so Redis keeps pairs + push keys safe there.
+// ---------------------------------------------------------------------------
+const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+const USE_REDIS = !!(REDIS_URL && REDIS_TOKEN);
+const KEY_PREFIX = process.env.STORE_PREFIX || "beepback";
+const SAVE_DELAY_MS = USE_REDIS ? 2000 : 400; // batch writes (fewer Redis commands on the free plan)
+
+async function redis(cmd, key, body) {
+  const res = await fetch(`${REDIS_URL}/${cmd}/${encodeURIComponent(key)}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    body,
+  });
+  if (!res.ok) throw new Error(`Upstash ${cmd} failed: HTTP ${res.status}`);
+  return (await res.json()).result;
+}
+const store = {
+  where: USE_REDIS ? "Upstash Redis" : DATA_DIR,
+  async get(name) {
+    if (USE_REDIS) return redis("get", `${KEY_PREFIX}:${name}`);
+    try { return fs.readFileSync(path.join(DATA_DIR, name + ".json"), "utf8"); }
+    catch (err) { if (err.code === "ENOENT") return null; throw err; }
+  },
+  async set(name, value) {
+    if (USE_REDIS) return redis("set", `${KEY_PREFIX}:${name}`, value);
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const file = path.join(DATA_DIR, name + ".json");
+    fs.writeFileSync(file + ".tmp", value);
+    fs.renameSync(file + ".tmp", file); // atomic replace so a crash never leaves half a file
+  },
+};
+
+// A failed read throws, so the server refuses to start rather than overwrite saved pairs with nothing.
+async function loadState() {
+  const text = await store.get("state");
+  if (!text) return;
+  const raw = JSON.parse(text);
+  for (const [code, r] of Object.entries(raw.rooms || {})) {
+    const clients = new Map((r.clients || []).map((id) => [id, { socketId: null, state: "awake", visible: false }]));
+    rooms.set(code, { clients, pending: r.pending || null, streak: r.streak || { count: 0, day: null }, lastActive: r.lastActive || Date.now() });
   }
+  for (const [id, p] of Object.entries(raw.profiles || {})) profiles.set(id, p);
+  console.log(`💾 loaded ${rooms.size} pair(s) from ${store.where}`);
 }
 
-let saveTimer = null;
+let saveTimer = null, saving = false, dirty = false;
 function save() {
   if (saveTimer) return;
-  saveTimer = setTimeout(() => { saveTimer = null; writeState(); }, 400);
+  saveTimer = setTimeout(() => { saveTimer = null; writeState(); }, SAVE_DELAY_MS);
 }
 function serialize() {
   const out = { rooms: {}, profiles: {} };
@@ -65,46 +97,48 @@ function serialize() {
   for (const [id, p] of profiles) out.profiles[id] = p;
   return JSON.stringify(out);
 }
-function writeState() {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const tmp = STATE_FILE + ".tmp";
-    fs.writeFileSync(tmp, serialize());
-    fs.renameSync(tmp, STATE_FILE); // atomic replace so a crash never leaves half a file
-  } catch (err) {
-    console.warn("could not save state:", err.message);
-  }
+async function writeState() {
+  if (saving) { dirty = true; return; }
+  saving = true;
+  try { await store.set("state", serialize()); }
+  catch (err) { console.warn("could not save state:", err.message); }
+  saving = false;
+  if (dirty) { dirty = false; save(); }
 }
-function flushAndExit() {
+let exiting = false;
+async function flushAndExit() {
+  if (exiting) return;
+  exiting = true;
   clearTimeout(saveTimer);
-  writeState();
+  setTimeout(() => process.exit(0), 5000).unref(); // never hang on shutdown
+  while (saving) await new Promise((r) => setTimeout(r, 50));
+  await writeState();
   process.exit(0);
 }
 process.on("SIGINT", flushAndExit);
 process.on("SIGTERM", flushAndExit);
 
 // ---------------------------------------------------------------------------
-// Web Push (VAPID keys come from env, or are generated once and saved)
+// Web Push: VAPID keys from env, else loaded from storage, else generated once and saved.
 // ---------------------------------------------------------------------------
-function setupPush() {
+async function setupPush() {
   let keys = null;
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     keys = { publicKey: process.env.VAPID_PUBLIC_KEY, privateKey: process.env.VAPID_PRIVATE_KEY };
   } else {
-    try { keys = JSON.parse(fs.readFileSync(VAPID_FILE, "utf8")); } catch {}
+    const saved = await store.get("vapid");
+    if (saved) keys = JSON.parse(saved);
     if (!keys) {
       keys = webpush.generateVAPIDKeys();
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(VAPID_FILE, JSON.stringify(keys));
-      console.log("🔑 generated push keys in", VAPID_FILE);
+      await store.set("vapid", JSON.stringify(keys));
+      console.log("🔑 generated push keys in", store.where);
     }
   }
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:beepback@example.com", keys.publicKey, keys.privateKey);
   return keys.publicKey;
 }
 
-loadState();
-const VAPID_PUBLIC_KEY = setupPush();
+let VAPID_PUBLIC_KEY = null; // set during startup (see bottom of file)
 
 // ---------------------------------------------------------------------------
 // HTTP
@@ -425,6 +459,14 @@ function sweep() {
 }
 setInterval(sweep, 60 * 60 * 1000).unref();
 
-server.listen(PORT, () => {
-  console.log(`🤖 BeepBack running at http://localhost:${PORT}`);
+// Load saved pairs + push keys first, then start accepting connections.
+(async () => {
+  await loadState();
+  VAPID_PUBLIC_KEY = await setupPush();
+  server.listen(PORT, () => {
+    console.log(`🤖 BeepBack running at http://localhost:${PORT}  (storage: ${store.where})`);
+  });
+})().catch((err) => {
+  console.error("❌ startup failed:", err.message);
+  process.exit(1);
 });

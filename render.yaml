@@ -1,22 +1,21 @@
-# Render blueprint: New → Blueprint → pick this repo.
-# The disk keeps pairs + push keys across restarts/deploys (disks need a paid instance;
-# on the free plan everything resets whenever the service restarts or sleeps).
+# Render blueprint (FREE plan): New → Blueprint → pick this repo.
+# Free web services have no disk, so pairs + push keys are kept in Upstash Redis (also free).
+# Render will ask you to paste the two UPSTASH_* values when you create the blueprint.
 services:
   - type: web
     name: beepback
     runtime: node
-    plan: starter
+    plan: free
+    region: singapore          # closest to India; change if your users are elsewhere
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      - key: DATA_DIR
-        value: /var/data
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false            # paste from the Upstash console
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false            # paste from the Upstash console
+      - key: VAPID_SUBJECT
+        sync: false            # e.g. mailto:you@yourmail.com
       - key: STREAK_TZ
         value: Asia/Kolkata
-      - key: VAPID_SUBJECT
-        value: mailto:you@example.com   # change to your own contact address
-    disk:
-      name: beepback-data
-      mountPath: /var/data
-      sizeGB: 1
