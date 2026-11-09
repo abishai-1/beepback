@@ -1,0 +1,22 @@
+# Render blueprint: New → Blueprint → pick this repo.
+# The disk keeps pairs + push keys across restarts/deploys (disks need a paid instance;
+# on the free plan everything resets whenever the service restarts or sleeps).
+services:
+  - type: web
+    name: beepback
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: STREAK_TZ
+        value: Asia/Kolkata
+      - key: VAPID_SUBJECT
+        value: mailto:you@example.com   # change to your own contact address
+    disk:
+      name: beepback-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>BeepBack</title>
+  <meta name="description" content="A tiny robot buddy for two people. Pair with a code, send emojis, and they stay until your friend beeps back." />
+  <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="BB" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- Top bar: partner status + streak + code + settings -->
+  <header class="bar" id="bar" hidden>
+    <div class="status" id="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">waiting for friend…</span>
+    </div>
+    <span class="streak" id="streak" title="Days in a row you beeped back" hidden></span>
+    <button class="chip" id="codeChip" title="Copy share link">——</button>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙︎</button>
+  </header>
+
+  <!-- The robot -->
+  <main class="stage" id="stage">
+    <div class="face-wrap" id="faceWrap">
+      <div class="face" id="face" role="button" tabindex="0"
+           aria-label="Robot face. Tap to send a thinking-of-you nudge, hold to send a hug">
+        <div class="eyes" id="eyes">
+          <div class="eye left"></div>
+          <div class="eye right"></div>
+          <span class="tear"></span>
+        </div>
+        <div class="blush left"></div>
+        <div class="blush right"></div>
+        <div class="mouth"></div>
+        <div class="zzz" aria-hidden="true"><span>z</span><span>z</span><span>z</span></div>
+      </div>
+      <!-- hold-to-hug heart -->
+      <div class="hug-heart" id="hugHeart" aria-hidden="true">♥</div>
+      <!-- held emoji: stays until the receiver replies -->
+      <div class="bubble" id="bubble" hidden>
+        <span class="bubble-emoji" id="bubbleEmoji"></span>
+        <span class="count" id="bubbleCount" hidden></span>
+        <span class="caption" id="bubbleCaption"></span>
+      </div>
+    </div>
+    <p class="hint" id="hint">tap my face to nudge 💭 · hold for a hug 🤗</p>
+  </main>
+
+  <!-- one-time "turn on notifications" card -->
+  <div class="notify-card" id="notifyCard" hidden>
+    <span>🔔 Get a ping when <b id="notifyName">your friend</b> beeps you</span>
+    <div class="row">
+      <button class="btn primary small" id="notifyYes">Turn on</button>
+      <button class="btn small" id="notifyNo">Not now</button>
+    </div>
+  </div>
+
+  <!-- Emoji bar -->
+  <nav class="emoji-bar" id="emojiBar" hidden></nav>
+
+  <!-- Floating layer for emojis / confetti / toasts -->
+  <div class="fx" id="fx" aria-hidden="true"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="offline" id="offline" hidden>reconnecting…</div>
+
+  <!-- Pairing sheet -->
+  <section class="sheet" id="pairSheet">
+    <div class="card">
+      <h1>BeepBack</h1>
+      <p class="sub">a tiny robot for two · send a beep, get one back</p>
+
+      <input id="nameInput" class="name-input" maxlength="20" placeholder="your name (optional)"
+             autocomplete="nickname" aria-label="Your name" />
+
+      <div id="pairChoose">
+        <button class="btn primary" id="createBtn">✨ Create a code</button>
+        <div class="or">or</div>
+        <form id="joinForm" autocomplete="off">
+          <input id="codeInput" class="code-input" maxlength="6" placeholder="ENTER CODE" inputmode="text"
+                 autocapitalize="characters" spellcheck="false" aria-label="Pairing code" />
+          <button class="btn" type="submit">Join</button>
+        </form>
+      </div>
+
+      <div id="pairWaiting" hidden>
+        <p>Share this code with your person:</p>
+        <div class="big-code" id="bigCode">——</div>
+        <div class="row">
+          <button class="btn" id="copyCodeBtn">Copy code</button>
+          <button class="btn" id="shareBtn">Share link</button>
+        </div>
+        <p class="muted">Waiting for them to join… <span class="spinner"></span></p>
+        <button class="link" id="cancelBtn">cancel</button>
+      </div>
+
+      <p class="error" id="pairError" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- Settings sheet -->
+  <section class="sheet" id="settingsSheet" hidden>
+    <div class="card">
+      <h2>Settings</h2>
+
+      <label class="field">
+        <span>Your name</span>
+        <input id="settingsName" class="name-input" maxlength="20" placeholder="your name" autocomplete="nickname" />
+      </label>
+
+      <div class="field">
+        <span>Your robot color <small class="muted">(your friend sees it)</small></span>
+        <div class="swatches" id="swatches" role="radiogroup" aria-label="Robot color"></div>
+      </div>
+
+      <button class="btn" id="notifyBtn">🔔 Turn on notifications</button>
+      <p class="muted small-note" id="notifyNote" hidden></p>
+
+      <label class="toggle"><input type="checkbox" id="soundToggle" checked /> <span>Sounds</span></label>
+      <label class="toggle"><input type="checkbox" id="vibeToggle" checked /> <span>Vibration</span></label>
+      <button class="btn" id="installBtn" hidden>📲 Install as widget</button>
+      <button class="btn danger" id="unpairBtn">Unpair</button>
+      <button class="link" id="closeSettingsBtn">close</button>
+    </div>
+  </section>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

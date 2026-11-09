@@ -1,0 +1,18 @@
+{
+  "name": "BeepBack: robot buddy for two",
+  "short_name": "BB",
+  "description": "A tiny robot for two. Pair with a code, send emojis, and they stay until your friend beeps back.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.log
+.DS_Store
+# saved pairs + push keys (keep private, don't commit)
+data/
