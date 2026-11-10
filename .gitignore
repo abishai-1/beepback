@@ -4,3 +4,10 @@ node_modules/
 .DS_Store
 # saved pairs + push keys (keep private, don't commit)
 data/
+
+# native widget experiments, kept locally only
+android/
+desktop/
+
+# local notes for Claude Code
+CLAUDE.md

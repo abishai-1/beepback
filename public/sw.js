@@ -1,7 +1,7 @@
 // BeepBack service worker: caches the app shell so the widget opens instantly,
 // and shows push notifications when your friend beeps you while the app is closed.
 // Realtime traffic (/socket.io/) always goes to the network.
-const CACHE = "beepback-v6";
+const CACHE = "beepback-v8";
 const SHELL = [
   "/",
   "/index.html",

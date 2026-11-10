@@ -19,7 +19,24 @@
   // Keep in sync with ALLOWED_COLORS in server.js
   const COLORS = ["#ff7aa8", "#ff9f68", "#ffd166", "#3ddc84", "#7cc8ff", "#c77dff"];
   const DEFAULT_COLOR = COLORS[0];
-  const NEEDS_SERVER_VERSION = 4;
+  const NEEDS_SERVER_VERSION = 5;
+  // Widget mode: the Windows desktop widget loads /?widget=1 (remembered for the session).
+  const IS_WIDGET = (() => {
+    try {
+      if (new URLSearchParams(location.search).get("widget") === "1") sessionStorage.setItem("bb.widget", "1");
+      return sessionStorage.getItem("bb.widget") === "1" || !!window.bbDesktop;
+    } catch { return !!window.bbDesktop; }
+  })();
+  if (IS_WIDGET) document.body.classList.add("widget");
+  // Inside the Windows app: a small "hide to tray" button (the window has no title bar).
+  if (window.bbDesktop) {
+    const hide = document.createElement("button");
+    hide.className = "widget-hide";
+    hide.title = "Hide (BeepBack stays in the tray)";
+    hide.textContent = "✕";
+    hide.addEventListener("click", () => window.bbDesktop.hide());
+    document.body.appendChild(hide);
+  }
   const SLEEP_AFTER_MS = 60_000;
   const HUG_HOLD_MS = 900;
   const LS = {
@@ -56,6 +73,8 @@
     settingsSheet: $("settingsSheet"), settingsName: $("settingsName"), swatches: $("swatches"),
     notifyBtn: $("notifyBtn"), notifyNote: $("notifyNote"),
     soundToggle: $("soundToggle"), vibeToggle: $("vibeToggle"), installBtn: $("installBtn"),
+    linkBtn: $("linkBtn"), linkPanel: $("linkPanel"), linkCode: $("linkCode"), linkExpiry: $("linkExpiry"),
+    showLinkBtn: $("showLinkBtn"), linkForm: $("linkForm"), linkInput: $("linkInput"),
   };
 
   const state = {
@@ -114,6 +133,14 @@
   }
   function vibrate(pattern) {
     if (state.vibe && navigator.vibrate) navigator.vibrate(pattern);
+  }
+  // In the Windows widget, show a desktop notification when the widget isn't focused.
+  function desktopNotify(body) {
+    if (!IS_WIDGET || document.hasFocus() || !("Notification" in window)) return;
+    try {
+      if (Notification.permission === "granted") new Notification(Friend(), { body, icon: "/icons/icon-192.png", silent: true });
+      else if (Notification.permission === "default") Notification.requestPermission();
+    } catch {}
   }
 
   // ---------- face: blink, look, expressions, sleep ----------
@@ -309,6 +336,7 @@
     beep(item.notes, item.wave);
     vibrate(40);
     if (item.confetti) confetti();
+    desktopNotify(`sent you ${e}`);
   }
 
   // ---------- tap = nudge, hold = hug ----------
@@ -332,6 +360,7 @@
     beep([1175, 880, 1175], "triangle", 0.08);
     vibrate([80, 40, 80]);
     toast(`💭 ${friend()} is thinking of you`);
+    desktopNotify("is thinking of you 💭");
   }
   function sendHug() {
     const now = Date.now();
@@ -353,6 +382,7 @@
     beep([523, 659, 784, 1046, 784], "sine", 0.1);
     vibrate([200, 80, 200]);
     toast(`🤗 ${friend()} sent you a hug`);
+    desktopNotify("sent you a hug 🤗");
   }
 
   function cancelHold() {
@@ -440,6 +470,8 @@
     el.pairChoose.hidden = waiting;
     el.pairWaiting.hidden = !waiting;
     el.nameInput.hidden = waiting;
+    el.showLinkBtn.hidden = waiting;
+    el.linkForm.hidden = true;
     el.pairError.textContent = error;
     el.bar.hidden = true;
     el.emojiBar.hidden = true;
@@ -496,8 +528,9 @@
     renderNotify();
   }
   async function disableNotifications() {
-    try { const sub = await currentSub(); if (sub) await sub.unsubscribe(); } catch {}
-    socket.emit("push-unsubscribe");
+    let endpoint = null;
+    try { const sub = await currentSub(); if (sub) { endpoint = sub.endpoint; await sub.unsubscribe(); } } catch {}
+    socket.emit("push-unsubscribe", { endpoint });
     store.set(LS.notif, "0");
     toast("notifications off", 1200);
     renderNotify();
@@ -526,7 +559,7 @@
     on ? disableNotifications() : enableNotifications();
   });
   function maybeAskNotifications() {
-    const ask = pushSupported() && Notification.permission === "default" && !store.get(LS.notifAsked);
+    const ask = !IS_WIDGET && pushSupported() && Notification.permission === "default" && !store.get(LS.notifAsked);
     el.notifyCard.hidden = !ask;
   }
   $("notifyYes").addEventListener("click", () => { store.set(LS.notifAsked, "1"); el.notifyCard.hidden = true; enableNotifications(); });
@@ -611,7 +644,13 @@
   });
 
   socket.on("partner-unpaired", () => { toast(`${Friend()} unpaired 💔`, 3000); flashExp("sad", 3000); });
-  socket.on("replaced", () => toast("opened in another tab", 3000));
+  socket.on("you-unpaired", () => {
+    if (!state.code) return;
+    forgetCode();
+    renderStatus({ paired: false });
+    el.settingsSheet.hidden = true;
+    showPairing();
+  });
   socket.on("emoji", ({ e }) => receiveEmoji(e));
   socket.on("nudge", receiveNudge);
   socket.on("hug", receiveHug);
@@ -638,6 +677,29 @@
   el.codeInput.addEventListener("input", () => {
     el.codeInput.value = el.codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   });
+  el.showLinkBtn.addEventListener("click", () => {
+    el.linkForm.hidden = !el.linkForm.hidden;
+    if (!el.linkForm.hidden) el.linkInput.focus();
+  });
+  el.linkInput.addEventListener("input", () => {
+    el.linkInput.value = el.linkInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  });
+  el.linkForm.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const linkCode = el.linkInput.value.trim();
+    if (linkCode.length !== 6) { el.pairError.textContent = "Link codes are 6 characters"; return; }
+    socket.emit("link-redeem", { linkCode }, (res) => {
+      if (!res || !res.ok) { el.pairError.textContent = (res && res.error) || "Couldn't link"; return; }
+      // become the same person as the other device, then join their pair
+      state.clientId = res.clientId;
+      store.set(LS.clientId, res.clientId);
+      el.linkForm.hidden = true;
+      el.linkInput.value = "";
+      el.pairError.textContent = "";
+      join(res.code);
+      toast("device linked ✓", 1500);
+    });
+  });
   $("copyCodeBtn").addEventListener("click", () => copy(state.code, "code copied!"));
   $("shareBtn").addEventListener("click", async () => {
     if (navigator.share) {
@@ -648,11 +710,19 @@
   el.codeChip.addEventListener("click", () => copy(shareUrl(), "share link copied!"));
 
   // ---------- settings ----------
-  $("settingsBtn").addEventListener("click", () => { renderNotify(); el.settingsSheet.hidden = false; });
+  $("settingsBtn").addEventListener("click", () => { renderNotify(); el.linkPanel.hidden = true; el.settingsSheet.hidden = false; });
   $("closeSettingsBtn").addEventListener("click", () => { el.settingsSheet.hidden = true; });
   el.settingsSheet.addEventListener("click", (ev) => { if (ev.target === el.settingsSheet) el.settingsSheet.hidden = true; });
   el.soundToggle.addEventListener("change", () => { state.sound = el.soundToggle.checked; store.set(LS.sound, state.sound ? "1" : "0"); });
   el.vibeToggle.addEventListener("change", () => { state.vibe = el.vibeToggle.checked; store.set(LS.vibe, state.vibe ? "1" : "0"); });
+  el.linkBtn.addEventListener("click", () => {
+    socket.emit("link-create", null, (res) => {
+      if (!res || !res.ok) { toast((res && res.error) || "couldn't make a link code", 2500); return; }
+      el.linkCode.textContent = res.linkCode;
+      el.linkExpiry.textContent = `works once, for ${res.expiresInMin} minutes`;
+      el.linkPanel.hidden = false;
+    });
+  });
   $("unpairBtn").addEventListener("click", () => {
     socket.emit("leave");
     forgetCode();

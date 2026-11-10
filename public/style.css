@@ -491,3 +491,46 @@ form { display: flex; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- device linking ---------- */
+.link-form, .link-panel { display: flex; flex-direction: column; gap: 10px; }
+.link-form .row { display: flex; gap: 8px; }
+
+/* ---------- widget mode (Windows desktop widget: ?widget=1) ---------- */
+body.widget { user-select: none; }
+body.widget .bar { -webkit-app-region: drag; padding: 6px 10px; font-size: 11px; }
+body.widget .bar button, body.widget .bar .streak { -webkit-app-region: no-drag; }
+body.widget .chip { display: none; }
+body.widget .hint { display: none; }
+body.widget .stage { gap: 0; }
+body.widget .face { width: min(86vw, calc((100dvh - 150px) / 0.75)); min-width: 120px; }
+body.widget .emoji-bar { gap: 4px; padding: 4px 6px 8px; flex-wrap: wrap; justify-content: center; }
+body.widget .emoji-bar::-webkit-scrollbar { display: none; }
+body.widget .emoji-btn { width: 32px; height: 32px; font-size: 18px; border-radius: 10px; flex: none; }
+body.widget .bubble { transform: translate(4%, -12%); padding: 6px 10px 5px; }
+body.widget .bubble-emoji { font-size: 26px; }
+body.widget .notify-card, body.widget #installBtn, body.widget #notifyBtn { display: none !important; }
+body.widget .toast { top: 36px; font-size: 12px; padding: 6px 12px; }
+body.widget .card { padding: 16px 14px; gap: 10px; }
+body.widget .card h1 { font-size: 22px; }
+body.widget .big-code { font-size: 26px; letter-spacing: 5px; }
+body.widget .offline { bottom: 52px; }
+body.widget .sheet { -webkit-app-region: drag; }
+body.widget .card { -webkit-app-region: no-drag; }
+.widget-hide {
+  position: fixed; top: 4px; right: 6px; z-index: 30;
+  background: none; border: 0; color: #666; font-size: 13px; padding: 4px 6px; line-height: 1;
+  -webkit-app-region: no-drag;
+}
+.widget-hide:hover { color: #fff; }
+body.widget .bar { padding-right: 30px; }
+/* compact pairing/settings cards inside the small widget window */
+body.widget .sheet { padding: 8px; }
+body.widget .card { gap: 8px; padding: 14px 12px; scrollbar-width: none; }
+body.widget .card::-webkit-scrollbar { display: none; }
+body.widget .sub, body.widget .or { display: none; }
+body.widget .code-input, body.widget .name-input { padding: 8px; font-size: 14px; }
+body.widget .code-input { letter-spacing: 2px; }
+body.widget .btn { padding: 9px 12px; font-size: 13px; }
+body.widget .link { font-size: 12px; }
+body.widget #pairChoose, body.widget #pairWaiting { gap: 8px; }

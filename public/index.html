@@ -102,6 +102,17 @@
       </div>
 
       <p class="error" id="pairError" role="alert"></p>
+
+      <!-- link this device to an existing BeepBack (same person, second device) -->
+      <button class="link" id="showLinkBtn">already using BeepBack? link this device</button>
+      <form id="linkForm" class="link-form" autocomplete="off" hidden>
+        <p class="muted">On your other device: ⚙ Settings → <b>Link another device</b>, then type the code here.</p>
+        <div class="row">
+          <input id="linkInput" class="code-input" maxlength="6" placeholder="LINK CODE"
+                 autocapitalize="characters" spellcheck="false" aria-label="Link code" />
+          <button class="btn" type="submit">Link</button>
+        </div>
+      </form>
     </div>
   </section>
 
@@ -125,7 +136,13 @@
 
       <label class="toggle"><input type="checkbox" id="soundToggle" checked /> <span>Sounds</span></label>
       <label class="toggle"><input type="checkbox" id="vibeToggle" checked /> <span>Vibration</span></label>
-      <button class="btn" id="installBtn" hidden>📲 Install as widget</button>
+      <button class="btn" id="linkBtn">📱 Link another device</button>
+      <div class="link-panel" id="linkPanel" hidden>
+        <p class="muted">On the new device (Windows widget, Android widget, another browser), choose <b>link this device</b> and enter:</p>
+        <div class="big-code" id="linkCode">——</div>
+        <p class="muted small-note" id="linkExpiry"></p>
+      </div>
+      <button class="btn" id="installBtn" hidden>📲 Install as app</button>
       <button class="btn danger" id="unpairBtn">Unpair</button>
       <button class="link" id="closeSettingsBtn">close</button>
     </div>
